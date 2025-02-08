@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fill Form</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h2>Fill in the details</h2>
+        <form action="/fill_form" method="post">
+            <input type="hidden" name="file_name" value="{{ file_name }}">
+            
+            {% for placeholder in placeholders %}
+                <label>{{ placeholder }}:</label>
+                <input type="text" name="{{ placeholder }}" required><br>
+            {% endfor %}
+
+            <button type="submit">Submit</button>
+        </form>
+    </div>
+</body>
+</html>
