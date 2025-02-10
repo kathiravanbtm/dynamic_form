@@ -139,11 +139,10 @@ button:hover {
 <body>
     <h2>Fill the Form</h2>
     <form action="/fill_form" method="post">
-        <input type="hidden" name="file_name" value="{{ file_name }}">
-
+        <input type="hidden" name="file_name" value="{{ filename }}">
         {% for field in placeholders.single %}
             <label>{{ field }}:</label>
-            <input type="text" name="{{ field }}" required><br>
+            <input type="text" name="{{ field }}" required><br> 
         {% endfor %}
 
         {% for field in placeholders.paragraphs %}

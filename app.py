@@ -1,9 +1,9 @@
-from flask import Flask, render_template, request, send_file
+from flask import Flask, render_template, request, send_file, flash, redirect, url_for
 from werkzeug.utils import secure_filename
 import os
 import docx
 import re
-import shutil
+from docx import Document
 
 app = Flask(__name__)
 
@@ -21,8 +21,7 @@ os.makedirs(MODIFIED_FOLDER, exist_ok=True)
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
-import re
-from docx import Document
+
 
 def extract_placeholders(docx_path):
     """Extract placeholders and categorize them into single inputs, paragraphs, lists, and loops."""
@@ -46,7 +45,6 @@ def extract_placeholders(docx_path):
     for para in doc.paragraphs:
         text = para.text.strip()
 
-        # Detect start of loop
         match_loop_start = re.search(loop_start_regex, text)
         if match_loop_start:
             in_loop = True
@@ -54,19 +52,16 @@ def extract_placeholders(docx_path):
             loops[loop_name] = set()
             continue
 
-        # Detect end of loop
         if re.search(loop_end_regex, text):
             in_loop = False
             loop_name = None
             continue
 
-        # If inside a loop, collect placeholders
         if in_loop and loop_name:
             fields = re.findall(single_line_regex, text) + re.findall(paragraph_regex, text)
             loops[loop_name].update(fields)
             continue
 
-        # Detect standalone placeholders
         matches_paragraph = re.findall(paragraph_regex, text)
         matches_list = re.findall(list_regex, text)
         matches_single = re.findall(single_line_regex, text)
@@ -74,14 +69,6 @@ def extract_placeholders(docx_path):
         paragraphs.update(matches_paragraph)
         lists.update(matches_list)
         single_inputs.update(matches_single)
-
-    # Extract placeholders from tables (only single-line inputs allowed)
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                text = cell.text.strip()
-                matches = re.findall(single_line_regex, text)
-                single_inputs.update(matches)
 
     return {
         "single": list(single_inputs),
@@ -91,60 +78,32 @@ def extract_placeholders(docx_path):
     }
 
 
-
-import os
-import docx
-
-import docx
-import os
-
-import docx
-import os
-
-import os
-import docx
-
 def replace_placeholders(doc_path, replacements):
     """Replaces placeholders, including single-line, paragraphs, lists, and loops, in a .docx file."""
+    if not os.path.exists(doc_path):
+        raise FileNotFoundError(f"File not found: {doc_path}")
+
     doc = docx.Document(doc_path)
 
     # Process paragraphs
     for para in doc.paragraphs:
         for placeholder, value in replacements.items():
-            placeholder_tag = f"{{{{{placeholder}}}}}"  # Standard placeholder
-            paragraph_tag = f"{{{{paragraph:{placeholder}}}}}"  # Paragraph-specific placeholder
-            list_tag = f"{{{{list:{placeholder}}}}}"  # List-specific placeholder
+            placeholder_tag = f"{{{{{placeholder}}}}}"
+            paragraph_tag = f"{{{{paragraph:{placeholder}}}}}"
+            list_tag = f"{{{{list:{placeholder}}}}}"
 
             if paragraph_tag in para.text:
                 para.text = para.text.replace(paragraph_tag, str(value))
-            elif list_tag in para.text:  # Handle lists
+            elif list_tag in para.text:
                 if isinstance(value, list):
                     formatted_list = "\n".join([f"{i+1}. {item}" for i, item in enumerate(value)])
                     para.text = para.text.replace(list_tag, formatted_list)
             elif placeholder_tag in para.text:
                 para.text = para.text.replace(placeholder_tag, str(value))
 
-    # Process tables
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                for placeholder, value in replacements.items():
-                    placeholder_tag = f"{{{{{placeholder}}}}}"
-                    paragraph_tag = f"{{{{paragraph:{placeholder}}}}}"
-                    list_tag = f"{{{{list:{placeholder}}}}}"
-
-                    if paragraph_tag in cell.text:
-                        cell.text = cell.text.replace(paragraph_tag, str(value))
-                    elif list_tag in cell.text:  # Handle lists inside tables
-                        if isinstance(value, list):
-                            formatted_list = "\n".join([f"{i+1}. {item}" for i, item in enumerate(value)])
-                            cell.text = cell.text.replace(list_tag, formatted_list)
-                    elif placeholder_tag in cell.text:
-                        cell.text = cell.text.replace(placeholder_tag, str(value))
-
     # Process looping sections
     for placeholder, values in replacements.items():
-        if isinstance(values, list) and all(isinstance(item, dict) for item in values):  # Check if it's a loop
+        if isinstance(values, list) and all(isinstance(item, dict) for item in values):  
             loop_start = f"{{loop:{placeholder}}}"
             loop_end = "{endloop}"
 
@@ -160,48 +119,92 @@ def replace_placeholders(doc_path, replacements):
                 loop_template = [p.text for p in doc.paragraphs[start_idx + 1:end_idx]]
                 new_content = []
 
-                for entry in values:  # Loop through data list
+                for entry in values:  
                     for template_line in loop_template:
                         new_line = template_line
                         for key, val in entry.items():
                             new_line = new_line.replace(f"{{{{{key}}}}}", str(val))
-                            new_line = new_line.replace(f"{{{{paragraph:{key}}}}}", str(val))
-                            new_line = new_line.replace(f"{{{{list:{key}}}}}", "\n".join([f"{i+1}. {item}" for i, item in enumerate(val)]) if isinstance(val, list) else str(val))
                         new_content.append(new_line)
 
-                # Replace looped section in document
                 doc.paragraphs[start_idx].text = "\n".join(new_content)
-                for i in range(start_idx + 1, end_idx + 1):
-                    doc.paragraphs[i].text = ""
+                for i in range(end_idx, start_idx, -1):
+                    doc.paragraphs.pop(i)
 
-    # Save modified document
-    modified_path = os.path.join("modified", "modified.docx")
+    # Ensure modified directory exists
+    os.makedirs(MODIFIED_FOLDER, exist_ok=True)
+
+    modified_path = os.path.join(MODIFIED_FOLDER, "modified.docx")
     doc.save(modified_path)
     return modified_path
-    
+
+
+@app.route("/", methods=["GET", "POST"])
+def index():
+    if request.method == "POST":
+        if "file" not in request.files:
+            flash("No file part")
+            return redirect(request.url)
+
+        file = request.files["file"]
+        if file.filename == "":
+            flash("No selected file")
+            return redirect(request.url)
+
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            file.save(file_path)
+            return redirect(url_for("form", filename=filename))
+
+    return render_template("upload.html")
+
+
+@app.route("/form")
+def form():
+    filename = request.args.get("filename")
+    if not filename:
+        flash("No file selected")
+        return redirect(url_for("index"))
+
+    file_path = os.path.join(UPLOAD_FOLDER, filename)
+    if not os.path.exists(file_path):
+        flash("File not found")
+        return redirect(url_for("index"))
+
+    placeholders = extract_placeholders(file_path)
+    print("checkingfilename", filename)
+    return render_template("form.html", filename=filename, placeholders=placeholders)
+
 
 @app.route("/fill_form", methods=["POST"])
 def fill_form():
+    print(request.form)
     filename = request.form.get("file_name")
-    file_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+    print("filename", filename)
+    file_path = os.path.join(UPLOAD_FOLDER, filename)   
+    print("hello. fjile path", file_path)
+    if not os.path.exists(file_path):
+        flash("File not found")
+        return redirect(url_for("index"))
 
     replacements = {}
     
-    # Process single and paragraph inputs
     for key, value in request.form.items():
         if key not in ["file_name"] and not key.endswith("[]"):
             replacements[key] = value
 
-    # Process list inputs
     for key in request.form:
         if key.endswith("[]"):
             replacements[key[:-2]] = request.form.getlist(key)
 
-    # Process looping sections
-    for loop_name in request.form:
-        if loop_name.startswith("loop_"):
-            loop_items = request.form.getlist(loop_name)
-            replacements[loop_name] = loop_items
+    loops_data = {}
+    for key in request.form:
+        if key.startswith("loop_"):
+            loop_name = key[5:]
+            loop_entries = request.form.getlist(key)
+            loops_data[loop_name] = loop_entries
+
+    replacements.update(loops_data)
 
     modified_file = replace_placeholders(file_path, replacements)
 
