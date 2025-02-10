@@ -1,24 +1,172 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fill Form</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+
+    <style>
+        /* General Page Styling */
+body {
+    font-family: Arial, sans-serif;
+    margin: 40px;
+    background-color: #f4f4f4;
+    color: #333;
+}
+
+/* Form Container */
+form {
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+    max-width: 500px;
+    margin: auto;
+}
+
+/* Headings */
+h2 {
+    text-align: center;
+    color: #444;
+}
+
+h3 {
+    margin-top: 20px;
+    color: #555;
+}
+
+/* Labels */
+label {
+    font-weight: bold;
+    display: block;
+    margin: 10px 0 5px;
+}
+
+/* Input Fields */
+input[type="text"],
+textarea {
+    width: 100%;
+    padding: 8px;
+    margin-bottom: 10px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    font-size: 14px;
+}
+
+/* Textarea */
+textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+
+/* Buttons */
+button {
+    background-color: #007bff;
+    color: white;
+    border: none;
+    padding: 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    display: block;
+    width: 100%;
+    margin-top: 10px;
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+/* Dynamic List & Loop Sections */
+#loop-sections, #list-items {
+    margin-top: 10px;
+}
+
+/* Dynamic Sections Styling */
+.loop-section {
+    background: #e9ecef;
+    padding: 10px;
+    margin-top: 10px;
+    border-radius: 5px;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+    form {
+        width: 90%;
+    }
+}
+
+    </style>
+
+
+    <script>
+        function addListItem(listId) {
+            let container = document.getElementById(listId); // Get the list container
+            let input = document.createElement("input"); // Create a new input field
+            input.type = "text";
+            input.name = listId + "[]"; // Maintain array format in form submission
+            container.appendChild(input); // Add input to the list container
+        }
+
+        function addLoopSection(loopName) {
+            let container = document.getElementById(loopName + "_container");
+            let section = document.createElement("div");
+            section.className = "loop-section";
+
+            let fieldsElement = document.getElementById(loopName + "_data");
+            if (!fieldsElement) {
+                console.error("Missing data-fields for loop:", loopName);
+                return;
+            }
+
+            let fields = JSON.parse(fieldsElement.dataset.fields);
+
+            fields.forEach(field => {
+                let label = document.createElement("label");
+                label.innerHTML = field + ":";
+                section.appendChild(label);
+
+                let input = document.createElement("input");
+                input.type = "text";
+                input.name = loopName + "[" + field + "][]";
+                section.appendChild(input);
+                section.appendChild(document.createElement("br"));
+            });
+
+            container.appendChild(section);
+        }
+    </script>
 </head>
 <body>
-    <div class="container">
-        <h2>Fill in the details</h2>
-        <form action="/fill_form" method="post">
-            <input type="hidden" name="file_name" value="{{ file_name }}">
-            
-            {% for placeholder in placeholders %}
-                <label>{{ placeholder }}:</label>
-                <input type="text" name="{{ placeholder }}" required><br>
-            {% endfor %}
+    <h2>Fill the Form</h2>
+    <form action="/fill_form" method="post">
+        <input type="hidden" name="file_name" value="{{ file_name }}">
 
-            <button type="submit">Submit</button>
-        </form>
-    </div>
+        {% for field in placeholders.single %}
+            <label>{{ field }}:</label>
+            <input type="text" name="{{ field }}" required><br>
+        {% endfor %}
+
+        {% for field in placeholders.paragraphs %}
+            <label>{{ field }}:</label>
+            <textarea name="{{ field }}" required></textarea><br>
+        {% endfor %}
+
+        {% for field in placeholders.lists %}
+            <label>{{ field }}:</label>
+            <div id="{{ field }}">
+                <input type="text" name="{{ field }}[]" required>
+            </div>
+            <button type="button" onclick="addListItem('{{ field }}')">+ Add Item</button><br>
+        {% endfor %}
+
+        {% for loop_name, fields in placeholders.loops.items() %}
+            <h3>{{ loop_name }}</h3>
+            <div id="{{ loop_name }}_container"></div>
+            <button type="button" onclick="addLoopSection('{{ loop_name }}')">+ Add {{ loop_name }}</button><br>
+            <div id="{{ loop_name }}_data" data-fields='{{ fields | tojson | safe }}' hidden></div>
+        {% endfor %}
+
+        <button type="submit">Generate Document</button>
+    </form>
 </body>
 </html>
