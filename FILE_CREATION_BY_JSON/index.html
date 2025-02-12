@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Easy Template X Processor</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>DOCX Template Processor</h1>
+
+        <label for="docxTemplate">Upload DOCX Template:</label>
+        <input type="file" id="docxTemplate" accept=".docx"><br><br>
+
+        <label for="jsonFile">Upload JSON File (optional):</label>
+        <input type="file" id="jsonFile" accept=".json"><br><br>
+
+        <label for="jsonInput">Or enter JSON data manually:</label><br>
+        <textarea id="jsonInput" rows="6">{}</textarea><br><br>
+
+        <button id="generateDocx">Generate DOCX</button>
+    </div>
+
+    <script type="module" src="script.js"></script>
+</body>
+</html>
