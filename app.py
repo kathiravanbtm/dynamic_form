@@ -1,21 +1,16 @@
-from flask import Flask, render_template, request, send_file, flash, redirect, url_for
+from flask import Flask, render_template, request, flash, redirect, url_for, send_from_directory
 from werkzeug.utils import secure_filename
 import os
-import docx
 import re
 from docx import Document
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
-MODIFIED_FOLDER = "modified"
 ALLOWED_EXTENSIONS = {"docx"}
 
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-app.config["MODIFIED_FOLDER"] = MODIFIED_FOLDER
-
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(MODIFIED_FOLDER, exist_ok=True)
 
 
 def allowed_file(filename):
@@ -23,20 +18,16 @@ def allowed_file(filename):
 
 
 def extract_placeholders(docx_path):
-    """Extract placeholders categorized into single inputs, paragraphs, lists, and loops."""
+    """Extracts placeholders as single inputs or loop structures."""
     doc = Document(docx_path)
 
-    single_inputs = set()
-    paragraphs = set()
-    lists = set()
-    loops = {}
+    text_inputs = set()  # Stores single-line placeholders
+    loops = {}  # Stores loop structures
 
-    # Regex patterns
-    single_line_regex = r"{{\s*([\w\d_]+)\s*}}"  
-    paragraph_regex = r"{{\s*paragraph:([\w\d_]+)\s*}}"  
-    list_regex = r"{{\s*list:([\w\d_]+)\s*}}"  
-    loop_open_regex = r"{{>>open\s+([\w\d_]+)\s*}}"  
-    loop_close_regex = r"{{<<close\s+([\w\d_]+)\s*}}"  
+    # Regex patterns for easy-template-x syntax
+    loop_open_regex = r"{#(\w+)}"  # Match {#loop_name}
+    loop_close_regex = r"{/}"  # Match {/}
+    variable_regex = r"{(\w+)}"  # Match {variable}
 
     in_loop = False
     loop_name = None
@@ -45,90 +36,80 @@ def extract_placeholders(docx_path):
         text = para.text.strip()
 
         match_loop_open = re.search(loop_open_regex, text)
+        match_loop_close = re.search(loop_close_regex, text)
+
         if match_loop_open:
             in_loop = True
             loop_name = match_loop_open.group(1)
             loops[loop_name] = set()
             continue
 
-        match_loop_close = re.search(loop_close_regex, text)
         if match_loop_close:
             in_loop = False
             loop_name = None
             continue
 
         if in_loop and loop_name:
-            fields = re.findall(single_line_regex, text) + re.findall(paragraph_regex, text)
+            fields = re.findall(variable_regex, text)
             loops[loop_name].update(fields)
             continue
 
-        paragraphs.update(re.findall(paragraph_regex, text))
-        lists.update(re.findall(list_regex, text))
-        single_inputs.update(re.findall(single_line_regex, text))
+        # Handle standalone text placeholders
+        placeholders = re.findall(variable_regex, text)
+        text_inputs.update(placeholders)
 
     return {
-        "single": list(single_inputs),
-        "paragraphs": list(paragraphs),
-        "lists": list(lists),
+        "single": list(text_inputs),
         "loops": {key: list(value) for key, value in loops.items()},
     }
 
 
-def replace_placeholders(doc_path, replacements):
-    """Replace placeholders including text, paragraphs, lists, and loops in a .docx file."""
-    if not os.path.exists(doc_path):
-        raise FileNotFoundError(f"File not found: {doc_path}")
 
-    doc = docx.Document(doc_path)
+def extract_placeholders(docx_path):
+    """Extracts placeholders, including loops and single inputs."""
+    doc = Document(docx_path)
 
-    # Replace standard placeholders
+    text_inputs = set()  # Stores single-line placeholders
+    loops = {}  # Stores loop structures
+
+    # Regex patterns with flexible spacing
+    loop_open_regex = r"{#\s*(\w+)\s*}"  # Match {#loop_name}
+    loop_close_regex = r"{/\s*(\w+)\s*}"  # Match {/loop_name}
+    variable_regex = r"{\s*(\w+)\s*}"  # Match {variable}
+
+    in_loop = False
+    loop_name = None
+
     for para in doc.paragraphs:
-        for placeholder, value in replacements.items():
-            placeholder_tag = f"{{{{{placeholder}}}}}"
-            paragraph_tag = f"{{{{paragraph:{placeholder}}}}}"
-            list_tag = f"{{{{list:{placeholder}}}}}"
+        text = para.text.strip()
 
-            if paragraph_tag in para.text:
-                para.text = para.text.replace(paragraph_tag, str(value))
-            elif list_tag in para.text and isinstance(value, list):
-                formatted_list = "\n".join([f"- {item}" for item in value])
-                para.text = para.text.replace(list_tag, formatted_list)
-            elif placeholder_tag in para.text:
-                para.text = para.text.replace(placeholder_tag, str(value))
+        # Detect loop start
+        match_loop_open = re.search(loop_open_regex, text)
+        if match_loop_open:
+            in_loop = True
+            loop_name = match_loop_open.group(1)
+            loops.setdefault(loop_name, set())
+            continue
 
-    # Process loops
-    for loop_name, values in replacements.items():
-        if isinstance(values, list) and all(isinstance(item, dict) for item in values):
-            loop_open_tag = f"{{>>open {loop_name}}}"
-            loop_close_tag = f"{{<<close {loop_name}}}"
+        # Detect loop end
+        match_loop_close = re.search(loop_close_regex, text)
+        if match_loop_close:
+            in_loop = False
+            loop_name = None
+            continue
 
-            start_idx, end_idx = None, None
-            for i, para in enumerate(doc.paragraphs):
-                if loop_open_tag in para.text:
-                    start_idx = i
-                if loop_close_tag in para.text:
-                    end_idx = i
-                    break
+        # Extract placeholders
+        placeholders = re.findall(variable_regex, text)
 
-            if start_idx is not None and end_idx is not None:
-                loop_template = [p.text for p in doc.paragraphs[start_idx + 1:end_idx]]
-                new_content = []
+        if in_loop and loop_name:
+            loops[loop_name].update(placeholders)
+        else:
+            text_inputs.update(placeholders)
 
-                for entry in values:
-                    for template_line in loop_template:
-                        new_line = template_line
-                        for key, val in entry.items():
-                            new_line = new_line.replace(f"{{{{{key}}}}}", str(val))
-                        new_content.append(new_line)
-
-                doc.paragraphs[start_idx].text = "\n".join(new_content)
-                for i in range(end_idx, start_idx, -1):
-                    doc.paragraphs.pop(i)
-
-    modified_path = os.path.join(MODIFIED_FOLDER, "modified.docx")
-    doc.save(modified_path)
-    return modified_path
-
+    return {
+        "single": list(text_inputs),
+        "loops": {key: list(value) for key, value in loops.items()},
+    }
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -153,6 +134,7 @@ def index():
 
 @app.route("/form")
 def form():
+    print("hello")
     filename = request.args.get("filename")
     if not filename:
         flash("No file selected")
@@ -162,39 +144,15 @@ def form():
     if not os.path.exists(file_path):
         flash("File not found")
         return redirect(url_for("index"))
-
+    print("hello")
     placeholders = extract_placeholders(file_path)
+    print("Extracted placeholders:", placeholders)
     return render_template("form.html", filename=filename, placeholders=placeholders)
 
 
-@app.route("/fill_form", methods=["POST"])
-def fill_form():
-    filename = request.form.get("file_name")
-    file_path = os.path.join(UPLOAD_FOLDER, filename)
-    if not os.path.exists(file_path):
-        flash("File not found")
-        return redirect(url_for("index"))
-
-    replacements = {}
-
-    for key, value in request.form.items():
-        if key not in ["file_name"] and not key.endswith("[]"):
-            replacements[key] = value
-
-    for key in request.form:
-        if key.endswith("[]"):
-            replacements[key[:-2]] = request.form.getlist(key)
-
-    loops_data = {}
-    for loop_name, fields in replacements.items():
-        if isinstance(fields, list) and all(isinstance(item, dict) for item in fields):
-            loops_data[loop_name] = fields
-
-    replacements.update(loops_data)
-
-    modified_file = replace_placeholders(file_path, replacements)
-
-    return send_file(modified_file, as_attachment=True)
+@app.route("/uploads/<filename>")
+def uploaded_file(filename):
+    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
 
 
 if __name__ == "__main__":
